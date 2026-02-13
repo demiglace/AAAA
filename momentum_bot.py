@@ -31,7 +31,7 @@ def get_trending_tokens():
     url = "https://public-api.birdeye.so/defi/token_trending"
     headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
     # limitを安全な50に戻す
-   　params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 20}
+    params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 20}
     
     try:
         response = requests.get(url, headers=headers, params=params, timeout=15)
