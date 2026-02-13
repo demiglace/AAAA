@@ -2,7 +2,7 @@ import requests
 import time
 import os
 
-# GitHub Secretsから安全に読み込む（直書き厳禁）
+# --- 設定（GitHub Secretsから読み込み） ---
 BIRDEYE_API_KEY = os.environ.get("BIRDEYE_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
@@ -10,10 +10,11 @@ def send_to_discord(message):
     if not DISCORD_WEBHOOK_URL: return
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
-    except Exception as e:
-        print(f"Discord送信エラー: {e}")
+    except:
+        pass
 
 def is_rugcheck_safe(ca):
+    """RugCheck APIによる安全性検品"""
     url = f"https://api.rugcheck.xyz/v1/tokens/{ca}/report"
     try:
         response = requests.get(url, timeout=10)
@@ -21,67 +22,88 @@ def is_rugcheck_safe(ca):
         risks = response.json().get("risks", [])
         for risk in risks:
             if risk.get("level") == "danger":
-                print(f"    [×] 却下: 危険判定 ({risk.get('name')})")
+                print(f"    [×] セキュリティ却下: {risk.get('name')}")
                 return False
         return True
     except:
         return False
 
-def get_trending_tokens():
+def get_birdeye_tokens():
+    """Birdeye APIからトレンド取得 (最大20件)"""
     url = "https://public-api.birdeye.so/defi/token_trending"
     headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
-    # limitを安全な50に戻す
     params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 20}
-    
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        raw_data = response.json()
-        
-        # --- ここが重要：生データをログに出力する ---
-        print(f"DEBUG: API Full Response: {raw_data}")
-        # ----------------------------------------
-
-        if raw_data.get("success"):
-            return raw_data.get("data", {}).get("tokens", [])
-        else:
-            print(f"DEBUG: 取得失敗の理由: {raw_data.get('message')}")
-            return []
-    except Exception as e:
-        print(f"DEBUG: 通信例外発生: {e}")
+        res = requests.get(url, headers=headers, params=params, timeout=10).json()
+        return res.get("data", {}).get("tokens", []) if res.get("success") else []
+    except:
         return []
-def main():
-    if not BIRDEYE_API_KEY:
-        print("[!] 警告: APIキーが環境変数に設定されていません。")
-        return
 
-    tokens = get_trending_tokens()
-    print(f"\n>>> モメンタム・スキャン開始 (全{len(tokens)}件) <<<")
+def get_dexscreener_tokens():
+    """DexScreenerから最新のブースト銘柄を取得 (無料・キー不要)"""
+    url = "https://api.dexscreener.com/token-boosts/latest/v1"
+    try:
+        # DexScreenerはトレンドのCA（コントラクトアドレス）をリストで返す
+        res = requests.get(url, timeout=10).json()
+        # Solanaチェーンの銘柄のみ抽出
+        return [t.get("tokenAddress") for t in res if t.get("chainId") == "solana"]
+    except:
+        return []
+
+def get_token_overview(ca):
+    """特定のCAの出来高・流動性データをBirdeyeから取得"""
+    url = f"https://public-api.birdeye.so/defi/token_overview?address={ca}"
+    headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
+    try:
+        res = requests.get(url, headers=headers, timeout=10).json()
+        return res.get("data", {}) if res.get("success") else None
+    except:
+        return None
+
+def main():
+    if not BIRDEYE_API_KEY: return
+    
+    # 1. 両方のAPIから候補を収集（重複排除）
+    print(">>> データ収集開始...")
+    birdeye_list = [t.get("address") for t in get_birdeye_tokens()]
+    dex_list = get_dexscreener_tokens()
+    all_ca = list(set(birdeye_list + dex_list)) # 重複を除いた全アドレス
+    
+    print(f">>> 監視対象: {len(all_ca)}件 (Birdeye: {len(birdeye_list)}, Dex: {len(dex_list)})")
     
     passed_count = 0
-    for token in tokens:
-        ca = token.get("address")
-        symbol = token.get("symbol")
-        liquidity = float(token.get("liquidity", 0) or 0)
-        v24h = float(token.get("volume24hUSD", 0) or 0)
-        v1h = float(token.get("volume1hUSD", 0) or 0)
+    for ca in all_ca:
+        data = get_token_overview(ca)
+        if not data: continue
         
+        symbol = data.get("symbol", "Unknown")
+        liquidity = float(data.get("v24hUSD", 0) or 0) # 簡易的に24h出来高を流動性の指標として使用
+        # 実際には data.get("liquidity") があればそれを使用
+        liq = float(data.get("liquidity", 0) or 0)
+        v24h = float(data.get("v24hUSD", 0) or 0)
+        v1h = float(data.get("v1hUSD", 0) or 0)
+        
+        # 加速判定 (1.2倍)
         avg_v1h = v24h / 24 if v24h > 0 else 0
         is_accelerating = v1h > (avg_v1h * 1.2)
         
-        if (15000 <= liquidity <= 300000) and is_accelerating and (v1h > liquidity * 0.05):
+        # 二段階選別：[数値フィルター] -> [セキュリティ検査]
+        if (15000 <= liq <= 300000) and is_accelerating and (v1h > liq * 0.05):
             if is_rugcheck_safe(ca):
                 passed_count += 1
                 msg = (
-                    f"🔥 **【加速検知】: {symbol}**\n"
+                    f"🚀 **【マルチソース検知】: {symbol}**\n"
                     f"```text\n"
                     f"加速率: {v1h/avg_v1h:.1f}倍 / 1h出来高: ${v1h:,.0f}\n"
-                    f"流動性: ${liquidity:,.0f}\n"
+                    f"流動性: ${liq:,.0f}\n"
                     f"```\n"
-                    f"🔍 **最終毒味(BubbleMaps)**: https://app.bubblemaps.io/sol/token/{ca}\n"
-                    f"📊 **チャート(GMGN)**: https://gmgn.ai/sol/token/{ca}"
+                    f"🔍 **BubbleMaps**: https://app.bubblemaps.io/sol/token/{ca}\n"
+                    f"📊 **GMGN**: https://gmgn.ai/sol/token/{ca}"
                 )
                 send_to_discord(msg)
-        time.sleep(0.5)
+                print(f"    [OK] 通知送信: {symbol}")
+        
+        time.sleep(0.6) # API制限回避
 
     print(f"\n>>> スキャン完了: {passed_count}件を通知しました。")
 
