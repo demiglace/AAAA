@@ -30,11 +30,24 @@ def is_rugcheck_safe(ca):
 def get_trending_tokens():
     url = "https://public-api.birdeye.so/defi/token_trending"
     headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
-    params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 100}
+    # limitを安全な50に戻す
+    params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 50}
+    
     try:
         response = requests.get(url, headers=headers, params=params, timeout=15)
-        return response.json().get("data", {}).get("tokens", [])
-    except:
+        raw_data = response.json()
+        
+        # --- ここが重要：生データをログに出力する ---
+        print(f"DEBUG: API Full Response: {raw_data}")
+        # ----------------------------------------
+
+        if raw_data.get("success"):
+            return raw_data.get("data", {}).get("tokens", [])
+        else:
+            print(f"DEBUG: 取得失敗の理由: {raw_data.get('message')}")
+            return []
+    except Exception as e:
+        print(f"DEBUG: 通信例外発生: {e}")
         return []
 def main():
     if not BIRDEYE_API_KEY:
