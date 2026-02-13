@@ -54,7 +54,7 @@ def main():
         v1h = float(token.get("volume1hUSD", 0) or 0)
         
         avg_v1h = v24h / 24 if v24h > 0 else 0
-        is_accelerating = v1h > (avg_v1h * 1.5)
+        is_accelerating = v1h > (avg_v1h * 1.2)
         
         if (15000 <= liquidity <= 300000) and is_accelerating and (v1h > liquidity * 0.1):
             if is_rugcheck_safe(ca):
