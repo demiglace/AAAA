@@ -27,39 +27,15 @@ def is_rugcheck_safe(ca):
     except:
         return False
 
-#def get_trending_tokens():
-    #url = "https://public-api.birdeye.so/defi/token_trending"
-    #headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
-    #params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 50}
-    #try:
-        #response = requests.get(url, headers=headers, params=params, timeout=15)
-        #return response.json().get("data", {}).get("tokens", [])
-    #except:
-        #return []
 def get_trending_tokens():
     url = "https://public-api.birdeye.so/defi/token_trending"
     headers = {"X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana"}
-    
-    # --- デバッグ用追加コード ---
-    if not BIRDEYE_API_KEY:
-        print("DEBUG: APIキーが環境変数から読み込めていません！")
-    else:
-        print(f"DEBUG: APIキーを検知しました (先頭4文字: {BIRDEYE_API_KEY[:4]}...)")
-    # --------------------------
-
+    params = {"sort_by": "volume24hUSD", "sort_type": "desc", "offset": 0, "limit": 100}
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        # 応答コードを表示（200以外なら失敗）
-        print(f"DEBUG: API応答ステータスコード: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"DEBUG: エラー内容: {response.text}")
-            
+        response = requests.get(url, headers=headers, params=params, timeout=15)
         return response.json().get("data", {}).get("tokens", [])
-    except Exception as e:
-        print(f"DEBUG: 通信エラー発生: {e}")
+    except:
         return []
-
 def main():
     if not BIRDEYE_API_KEY:
         print("[!] 警告: APIキーが環境変数に設定されていません。")
@@ -79,7 +55,7 @@ def main():
         avg_v1h = v24h / 24 if v24h > 0 else 0
         is_accelerating = v1h > (avg_v1h * 1.2)
         
-        if (15000 <= liquidity <= 300000) and is_accelerating and (v1h > liquidity * 0.1):
+        if (15000 <= liquidity <= 300000) and is_accelerating and (v1h > liquidity * 0.05):
             if is_rugcheck_safe(ca):
                 passed_count += 1
                 msg = (
